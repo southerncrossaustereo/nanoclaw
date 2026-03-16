@@ -1,0 +1,4 @@
+{
+  "_default": "ghp_YOUR_TOKEN_HERE",
+  "some-group": "vault:nanoclaw-github-pat-for-some-group"
+}

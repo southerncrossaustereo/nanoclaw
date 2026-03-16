@@ -188,6 +188,77 @@ Groups can have extra directories mounted. Add `containerConfig` to their entry:
 
 The directory will appear at `/workspace/extra/webapp` in that group's container.
 
+#### Enabling CLI Tool Access
+
+Groups can be given access to external CLI tools via `containerConfig` flags. Each tool is gated independently per group. To enable for an existing group, re-register it with the same JID and updated `containerConfig`.
+
+**GitHub CLI (`gh`)**
+Set `githubAccess: true`. The container gets a `GH_TOKEN` env var loaded from `~/.config/nanoclaw/github-tokens.json` on the host.
+
+**Azure CLI (`az`)**
+Set `azureAccess: true`. The host's `~/.azure/` directory is mounted read-only, so `az` inherits the host's authenticated session.
+
+**Atlassian CLI (`acli`)**
+Set `atlassianAccess: true`. Credentials are loaded from `~/.config/nanoclaw/atlassian-tokens.json` and used to authenticate `acli jira` and `acli confluence` on container startup.
+
+Example with all three enabled:
+
+```json
+{
+  "containerConfig": {
+    "githubAccess": true,
+    "azureAccess": true,
+    "atlassianAccess": true
+  }
+}
+```
+
+All token files support per-group credentials and a `_default` fallback:
+
+```json
+// github-tokens.json
+{ "_default": "ghp_...", "dev-team": "ghp_different_token" }
+
+// atlassian-tokens.json
+{
+  "_default": { "site": "mysite.atlassian.net", "email": "user@example.com", "token": "..." },
+  "dev-team": { "site": "other.atlassian.net", "email": "other@example.com", "token": "..." }
+}
+```
+
+Azure uses the host's session directly — no token file needed.
+
+#### Secret Vault References
+
+Token file values can reference secrets stored in an external vault instead of being plaintext. Use the `vault:` prefix:
+
+```json
+// github-tokens.json — token resolved from vault at startup
+{ "_default": "vault:nanoclaw-github-pat" }
+
+// atlassian-tokens.json — mix plaintext and vault references
+{
+  "_default": {
+    "site": "mysite.atlassian.net",
+    "email": "user@example.com",
+    "token": "vault:nanoclaw-atlassian-token"
+  }
+}
+```
+
+The vault provider is configured in `~/.config/nanoclaw/secrets.json`:
+
+```json
+{
+  "provider": "azure-keyvault",
+  "azure-keyvault": {
+    "vaultUrl": "https://my-vault.vault.azure.net"
+  }
+}
+```
+
+If `secrets.json` doesn't exist, vault references are unsupported and all values must be plaintext.
+
 #### Sender Allowlist
 
 After registering a group, explain the sender allowlist feature to the user:

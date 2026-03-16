@@ -24,7 +24,31 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    apt-transport-https \
+    ca-certificates \
+    gnupg \
+    lsb-release \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Azure CLI
+RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+
+# Install kubectl
+RUN curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /" > /etc/apt/sources.list.d/kubernetes.list \
+    && apt-get update && apt-get install -y kubectl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI (gh)
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Atlassian CLI (acli)
+RUN curl -fsSL https://acli.atlassian.com/linux/latest/acli_linux_amd64/acli -o /usr/local/bin/acli \
+    && chmod +x /usr/local/bin/acli
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
@@ -55,7 +79,25 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/
 # Container input (prompt, group info) is passed via stdin JSON.
 # Credentials are injected by the host's credential proxy — never passed here.
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+RUN cat > /app/entrypoint.sh <<'ENTRY' && chmod +x /app/entrypoint.sh
+#!/bin/bash
+set -e
+
+# Compile agent-runner TypeScript
+cd /app && npx tsc --outDir /tmp/dist 2>&1 >&2
+ln -s /app/node_modules /tmp/dist/node_modules
+chmod -R a-w /tmp/dist
+
+# Authenticate Atlassian CLI if credentials are provided
+if [ -n "$ACLI_TOKEN" ] && [ -n "$ACLI_SITE" ] && [ -n "$ACLI_EMAIL" ]; then
+  echo "$ACLI_TOKEN" | acli jira auth login --site "$ACLI_SITE" --email "$ACLI_EMAIL" --token 2>&1 >&2 || true
+  echo "$ACLI_TOKEN" | acli confluence auth login --site "$ACLI_SITE" --email "$ACLI_EMAIL" --token 2>&1 >&2 || true
+fi
+
+# Read input and run agent
+cat > /tmp/input.json
+node /tmp/dist/index.js < /tmp/input.json
+ENTRY
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node

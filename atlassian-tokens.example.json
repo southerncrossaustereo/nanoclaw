@@ -1,0 +1,7 @@
+{
+  "_default": {
+    "site": "yoursite.atlassian.net",
+    "email": "you@example.com",
+    "token": "vault:nanoclaw-atlassian-api-token"
+  }
+}

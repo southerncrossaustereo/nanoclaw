@@ -27,6 +27,25 @@ export const MOUNT_ALLOWLIST_PATH = path.join(
   'nanoclaw',
   'mount-allowlist.json',
 );
+export const GITHUB_TOKENS_PATH = path.join(
+  HOME_DIR,
+  '.config',
+  'nanoclaw',
+  'github-tokens.json',
+);
+export const ATLASSIAN_TOKENS_PATH = path.join(
+  HOME_DIR,
+  '.config',
+  'nanoclaw',
+  'atlassian-tokens.json',
+);
+export const AZURE_CONFIG_DIR = path.join(HOME_DIR, '.azure');
+export const SECRETS_CONFIG_PATH = path.join(
+  HOME_DIR,
+  '.config',
+  'nanoclaw',
+  'secrets.json',
+);
 export const SENDER_ALLOWLIST_PATH = path.join(
   HOME_DIR,
   '.config',

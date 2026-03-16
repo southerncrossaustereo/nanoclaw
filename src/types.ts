@@ -30,6 +30,9 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  githubAccess?: boolean; // Enable gh CLI — token loaded from ~/.config/nanoclaw/github-tokens.json
+  azureAccess?: boolean; // Enable az CLI — mounts host ~/.azure/ read-only
+  atlassianAccess?: boolean; // Enable acli — credentials from ~/.config/nanoclaw/atlassian-tokens.json
 }
 
 export interface RegisteredGroup {

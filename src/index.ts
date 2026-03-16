@@ -20,6 +20,7 @@ import {
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
+  initSecrets,
 } from './container-runner.js';
 import {
   cleanupOrphans,
@@ -470,6 +471,9 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+
+  // Initialize secret provider for vault-referenced credentials
+  await initSecrets();
 
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(

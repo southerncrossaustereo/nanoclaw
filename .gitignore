@@ -21,6 +21,9 @@ groups/global/*
 # Secrets
 *.keys.json
 .env
+secrets.json
+github-tokens.json
+atlassian-tokens.json
 
 # Temp files
 .tmp-*

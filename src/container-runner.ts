@@ -7,11 +7,14 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  ATLASSIAN_TOKENS_PATH,
+  AZURE_CONFIG_DIR,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
+  GITHUB_TOKENS_PATH,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   TIMEZONE,
@@ -27,7 +30,25 @@ import {
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import {
+  initSecretProvider,
+  resolveSecrets,
+  SecretProvider,
+} from './secret-provider.js';
 import { RegisteredGroup } from './types.js';
+
+let secretProvider: SecretProvider | null = null;
+
+/** Initialize the secret provider. Call once from main() before any container runs. */
+export async function initSecrets(): Promise<void> {
+  secretProvider = await initSecretProvider();
+  if (secretProvider) {
+    logger.info(
+      { provider: secretProvider.name },
+      'Secret provider initialized',
+    );
+  }
+}
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -199,6 +220,15 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Azure CLI: mount host ~/.azure/ read-only so `az` inherits the host session
+  if (group.containerConfig?.azureAccess && fs.existsSync(AZURE_CONFIG_DIR)) {
+    mounts.push({
+      hostPath: AZURE_CONFIG_DIR,
+      containerPath: '/home/node/.azure',
+      readonly: true,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -212,9 +242,72 @@ function buildVolumeMounts(
   return mounts;
 }
 
+/**
+ * Generic token file loader with per-group keys and _default fallback.
+ * Caches each file in memory for the lifetime of the process.
+ * Resolves any `vault:secret-name` references via the secret provider.
+ */
+const tokenFileCache = new Map<string, Record<string, unknown>>();
+
+async function loadTokenFile<T>(
+  filePath: string,
+  groupFolder: string,
+): Promise<T | null> {
+  if (!tokenFileCache.has(filePath)) {
+    try {
+      if (fs.existsSync(filePath)) {
+        let parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        if (secretProvider) {
+          parsed = await resolveSecrets(parsed, secretProvider);
+        }
+        tokenFileCache.set(filePath, parsed);
+      } else {
+        tokenFileCache.set(filePath, {});
+      }
+    } catch (err) {
+      logger.warn({ path: filePath, error: err }, 'Failed to load token file');
+      tokenFileCache.set(filePath, {});
+    }
+  }
+
+  const data = tokenFileCache.get(filePath)!;
+  return ((data[groupFolder] ?? data['_default']) as T) || null;
+}
+
+/** GitHub: returns a single token string */
+async function loadGithubToken(groupFolder: string): Promise<string | null> {
+  return loadTokenFile<string>(GITHUB_TOKENS_PATH, groupFolder);
+}
+
+/**
+ * Atlassian credentials file format:
+ * { "_default": { "site": "mysite.atlassian.net", "email": "user@example.com", "token": "..." } }
+ * or per-group: { "dev-team": { ... }, "_default": { ... } }
+ */
+export interface AtlassianCredentials {
+  site: string;
+  email: string;
+  token: string;
+}
+
+async function loadAtlassianCredentials(
+  groupFolder: string,
+): Promise<AtlassianCredentials | null> {
+  return loadTokenFile<AtlassianCredentials>(
+    ATLASSIAN_TOKENS_PATH,
+    groupFolder,
+  );
+}
+
+interface ToolCredentials {
+  githubToken?: string | null;
+  atlassianCreds?: AtlassianCredentials | null;
+}
+
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  creds?: ToolCredentials,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -236,6 +329,16 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Inject tool credentials as env vars for this group
+  if (creds?.githubToken) {
+    args.push('-e', `GH_TOKEN=${creds.githubToken}`);
+  }
+  if (creds?.atlassianCreds) {
+    args.push('-e', `ACLI_SITE=${creds.atlassianCreds.site}`);
+    args.push('-e', `ACLI_EMAIL=${creds.atlassianCreds.email}`);
+    args.push('-e', `ACLI_TOKEN=${creds.atlassianCreds.token}`);
   }
 
   // Runtime-specific args for host gateway resolution
@@ -278,7 +381,15 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const creds: ToolCredentials = {
+    githubToken: group.containerConfig?.githubAccess
+      ? await loadGithubToken(group.folder)
+      : null,
+    atlassianCreds: group.containerConfig?.atlassianAccess
+      ? await loadAtlassianCredentials(group.folder)
+      : null,
+  };
+  const containerArgs = buildContainerArgs(mounts, containerName, creds);
 
   logger.debug(
     {
