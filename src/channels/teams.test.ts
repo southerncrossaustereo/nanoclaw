@@ -23,11 +23,9 @@ vi.mock('../env.js', () => ({
 let lastProcessLogic: ((context: any) => Promise<void>) | null = null;
 
 const mockContinueConversationAsync = vi.fn();
-const mockAdapterProcess = vi.fn(
-  async (_req: any, _res: any, logic: any) => {
-    lastProcessLogic = logic;
-  },
-);
+const mockAdapterProcess = vi.fn(async (_req: any, _res: any, logic: any) => {
+  lastProcessLogic = logic;
+});
 
 vi.mock('botbuilder', () => {
   class MockCloudAdapter {
@@ -403,10 +401,7 @@ describe('TeamsChannel', () => {
         },
       );
 
-      await channel.sendMessage(
-        'teams:19:test-channel@thread.tacv2',
-        'Hello!',
-      );
+      await channel.sendMessage('teams:19:test-channel@thread.tacv2', 'Hello!');
 
       expect(mockContinueConversationAsync).toHaveBeenCalledWith(
         'app-id',

@@ -48,7 +48,10 @@ function conversationToJid(activity: Partial<Activity>): string {
  * Teams wraps mentions as: <at>BotName</at>
  */
 function stripMentions(text: string): string {
-  return text.replace(/<at>.*?<\/at>/g, '').replace(/\s+/g, ' ').trim();
+  return text
+    .replace(/<at>.*?<\/at>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
@@ -61,9 +64,7 @@ function stripMentions(text: string): string {
 function isBotMentioned(activity: Partial<Activity>, botId: string): boolean {
   if (!activity.entities) return false;
   return activity.entities.some(
-    (e) =>
-      e.type === 'mention' &&
-      (e as any).mentioned?.id?.includes(botId),
+    (e) => e.type === 'mention' && (e as any).mentioned?.id?.includes(botId),
   );
 }
 
@@ -143,9 +144,7 @@ export class TeamsChannel implements Channel {
         // Health endpoint
         if (method === 'GET' && url === '/health') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({ status: 'ok', connected: this.connected }),
-          );
+          res.end(JSON.stringify({ status: 'ok', connected: this.connected }));
           return;
         }
 
@@ -155,7 +154,11 @@ export class TeamsChannel implements Channel {
             // Read body and wrap req/res for the Bot Framework adapter
             const body = await readBody(req);
             logger.info(
-              { type: body.type, from: body.from, hasAuth: !!req.headers.authorization },
+              {
+                type: body.type,
+                from: body.from,
+                hasAuth: !!req.headers.authorization,
+              },
               'Teams activity received',
             );
             const botReq = toBotRequest(req, body);
@@ -165,7 +168,11 @@ export class TeamsChannel implements Channel {
             );
           } catch (err: any) {
             logger.error(
-              { err: err?.message || err, statusCode: err?.statusCode, stack: err?.stack },
+              {
+                err: err?.message || err,
+                statusCode: err?.statusCode,
+                stack: err?.stack,
+              },
               'Teams /api/messages processing error',
             );
             if (!res.writableEnded) {
@@ -214,9 +221,7 @@ export class TeamsChannel implements Channel {
       // This also handles the case where the message is *only* a mention
       // (stripped text is empty).
       if (botMentioned) {
-        text = text
-          ? `@${ASSISTANT_NAME} ${text}`
-          : `@${ASSISTANT_NAME}`;
+        text = text ? `@${ASSISTANT_NAME} ${text}` : `@${ASSISTANT_NAME}`;
       }
 
       if (!text) return;
@@ -460,10 +465,7 @@ registerChannel('teams', (opts: ChannelOpts) => {
     return null; // Credentials missing — skip this channel
   }
 
-  const port = parseInt(
-    process.env.TEAMS_PORT || env.TEAMS_PORT || '3978',
-    10,
-  );
+  const port = parseInt(process.env.TEAMS_PORT || env.TEAMS_PORT || '3978', 10);
   const tenantId = process.env.TEAMS_TENANT_ID || env.TEAMS_TENANT_ID;
 
   return new TeamsChannel(opts, appId, appPassword, port, tenantId);
