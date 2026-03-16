@@ -70,6 +70,16 @@ export const CREDENTIAL_PROXY_PORT = parseInt(
   process.env.CREDENTIAL_PROXY_PORT || '3001',
   10,
 );
+export const HTTP_SERVER_PORT = parseInt(
+  process.env.HTTP_SERVER_PORT || '3080',
+  10,
+);
+export const WEBHOOK_TOKENS_PATH = path.join(
+  HOME_DIR,
+  '.config',
+  'nanoclaw',
+  'webhook-tokens.json',
+);
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(

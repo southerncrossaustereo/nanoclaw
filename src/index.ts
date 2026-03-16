@@ -4,12 +4,14 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  HTTP_SERVER_PORT,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import { startHttpServer, stopHttpServer } from './http-server.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -486,10 +488,14 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
+  // Start shared HTTP server — channels and subsystems register routes against this
+  await startHttpServer(HTTP_SERVER_PORT);
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
+    await stopHttpServer();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);

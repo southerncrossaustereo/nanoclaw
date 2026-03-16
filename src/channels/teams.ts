@@ -5,10 +5,11 @@ import {
   Activity,
   ConversationReference,
 } from 'botbuilder';
-import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
+import { IncomingMessage, ServerResponse } from 'http';
 
 import { ASSISTANT_NAME } from '../config.js';
 import { readEnvFile } from '../env.js';
+import { registerRoute } from '../http-server.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -73,10 +74,8 @@ export class TeamsChannel implements Channel {
 
   private adapter!: CloudAdapter;
   private connected = false;
-  private port: number;
   private appId: string;
   private appPassword: string;
-  private server: Server | null = null;
 
   // Store conversation references keyed by JID for proactive messaging
   private conversationRefs = new Map<string, Partial<ConversationReference>>();
@@ -89,13 +88,11 @@ export class TeamsChannel implements Channel {
     opts: TeamsChannelOpts,
     appId: string,
     appPassword: string,
-    port: number,
     tenantId?: string,
   ) {
     this.opts = opts;
     this.appId = appId;
     this.appPassword = appPassword;
-    this.port = port;
     this.tenantId = tenantId;
   }
 
@@ -123,85 +120,45 @@ export class TeamsChannel implements Channel {
       }
     };
 
-    this.server = createServer(
-      async (req: IncomingMessage, res: ServerResponse) => {
-        const url = req.url || '';
-        const method = req.method || '';
-
-        logger.info({ method, url }, 'Teams HTTP request received');
-
-        // CORS preflight — Teams sends OPTIONS before POST
-        if (method === 'OPTIONS') {
-          res.writeHead(200, {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-          });
-          res.end();
-          return;
-        }
-
-        // Health endpoint
-        if (method === 'GET' && url === '/health') {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ status: 'ok', connected: this.connected }));
-          return;
-        }
-
-        // Teams messaging endpoint
-        if (method === 'POST' && url === '/api/messages') {
-          try {
-            // Read body and wrap req/res for the Bot Framework adapter
-            const body = await readBody(req);
-            logger.info(
-              {
-                type: body.type,
-                from: body.from,
-                hasAuth: !!req.headers.authorization,
-              },
-              'Teams activity received',
-            );
-            const botReq = toBotRequest(req, body);
-            const botRes = toBotResponse(res);
-            await this.adapter.process(botReq, botRes, (context) =>
-              this.handleActivity(context),
-            );
-          } catch (err: any) {
-            logger.error(
-              {
-                err: err?.message || err,
-                statusCode: err?.statusCode,
-                stack: err?.stack,
-              },
-              'Teams /api/messages processing error',
-            );
-            if (!res.writableEnded) {
-              res.writeHead(err?.statusCode || 500);
-              res.end(err?.message || 'Internal Server Error');
-            }
-          }
-          return;
-        }
-
-        res.writeHead(404);
-        res.end();
-      },
-    );
-
-    return new Promise((resolve, reject) => {
-      this.server!.listen(this.port, () => {
-        this.connected = true;
+    // Register Teams routes on the shared HTTP server
+    registerRoute('POST', '/api/messages', async (req, res, body) => {
+      try {
+        const activity = body as Record<string, unknown>;
         logger.info(
-          { port: this.port, tenantMode: isSingleTenant ? 'single' : 'multi' },
-          'Teams channel connected — listening for webhook',
+          {
+            type: activity.type,
+            from: activity.from,
+            hasAuth: !!req.headers.authorization,
+          },
+          'Teams activity received',
         );
-        resolve();
-      });
-      this.server!.on('error', (err: Error) => {
-        logger.error({ err }, 'Teams HTTP server error');
-        reject(err);
-      });
+        const botReq = toBotRequest(req, activity);
+        const botRes = toBotResponse(res);
+        await this.adapter.process(botReq, botRes, (context) =>
+          this.handleActivity(context),
+        );
+      } catch (err: any) {
+        logger.error(
+          { err: err?.message, statusCode: err?.statusCode },
+          'Teams /api/messages processing error',
+        );
+        if (!res.writableEnded) {
+          res.writeHead(err?.statusCode || 500);
+          res.end(err?.message || 'Internal Server Error');
+        }
+      }
     });
+
+    registerRoute('GET', '/api/teams/health', async (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', connected: this.connected }));
+    });
+
+    this.connected = true;
+    logger.info(
+      { tenantMode: isSingleTenant ? 'single' : 'multi' },
+      'Teams channel connected — routes registered on shared HTTP server',
+    );
   }
 
   private async handleActivity(context: TurnContext): Promise<void> {
@@ -351,10 +308,6 @@ export class TeamsChannel implements Channel {
 
   async disconnect(): Promise<void> {
     this.connected = false;
-    if (this.server) {
-      this.server.close();
-      this.server = null;
-    }
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
@@ -375,23 +328,6 @@ export class TeamsChannel implements Channel {
       logger.debug({ jid, error: err }, 'Failed to send typing indicator');
     }
   }
-}
-
-/** Read the full request body as a parsed JSON object. */
-function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('end', () => {
-      try {
-        const raw = Buffer.concat(chunks).toString('utf-8');
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch (err) {
-        reject(err);
-      }
-    });
-    req.on('error', reject);
-  });
 }
 
 /** Wrap Node IncomingMessage into the shape Bot Framework expects. */
@@ -470,7 +406,6 @@ registerChannel('teams', (opts: ChannelOpts) => {
   const env = readEnvFile([
     'TEAMS_APP_ID',
     'TEAMS_APP_PASSWORD',
-    'TEAMS_PORT',
     'TEAMS_TENANT_ID',
   ]);
   const appId = process.env.TEAMS_APP_ID || env.TEAMS_APP_ID;
@@ -480,8 +415,13 @@ registerChannel('teams', (opts: ChannelOpts) => {
     return null; // Credentials missing — skip this channel
   }
 
-  const port = parseInt(process.env.TEAMS_PORT || env.TEAMS_PORT || '3978', 10);
-  const tenantId = process.env.TEAMS_TENANT_ID || env.TEAMS_TENANT_ID;
+  if (process.env.TEAMS_PORT) {
+    logger.warn(
+      'TEAMS_PORT is deprecated. The shared HTTP server uses HTTP_SERVER_PORT instead. ' +
+      'Set HTTP_SERVER_PORT=' + process.env.TEAMS_PORT + ' to keep the same port.',
+    );
+  }
 
-  return new TeamsChannel(opts, appId, appPassword, port, tenantId);
+  const tenantId = process.env.TEAMS_TENANT_ID || env.TEAMS_TENANT_ID;
+  return new TeamsChannel(opts, appId, appPassword, tenantId);
 });

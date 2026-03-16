@@ -46,24 +46,20 @@ vi.mock('botbuilder', () => {
   };
 });
 
-// Mock http.createServer — capture the request handler
-let capturedHandler: ((req: any, res: any) => Promise<void>) | null = null;
-const mockServerInstance = {
-  listen: vi.fn((_port: number, cb: Function) => cb()),
-  close: vi.fn(),
-  on: vi.fn(),
-};
+// Mock registerRoute — capture registered handlers
+const registeredRoutes: Array<{
+  method: string;
+  path: string;
+  handler: Function;
+}> = [];
 
-vi.mock('http', async () => {
-  const actual = await vi.importActual<typeof import('http')>('http');
-  return {
-    ...actual,
-    createServer: vi.fn((handler: any) => {
-      capturedHandler = handler;
-      return mockServerInstance;
-    }),
-  };
-});
+vi.mock('../http-server.js', () => ({
+  registerRoute: vi.fn(
+    (method: string, path: string, handler: Function) => {
+      registeredRoutes.push({ method, path, handler });
+    },
+  ),
+}));
 
 import { TeamsChannel, TeamsChannelOpts } from './teams.js';
 
@@ -113,28 +109,33 @@ function makeTurnContext(activity: any) {
   };
 }
 
-/** Simulate a POST /api/messages hitting the HTTP handler, then invoke the bot logic. */
+function getRouteHandler(method: string, path: string): Function | undefined {
+  const route = registeredRoutes.find(
+    (r) => r.method === method && r.path === path,
+  );
+  return route?.handler;
+}
+
+/** Simulate a POST /api/messages by calling the registered route handler. */
 async function simulateIncomingMessage(
   activity: any,
 ): Promise<ReturnType<typeof makeTurnContext>> {
-  // Simulate the HTTP request handler
+  const handler = getRouteHandler('POST', '/api/messages');
+  if (!handler) throw new Error('POST /api/messages route not registered');
+
   const req = {
-    url: '/api/messages',
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    on: vi.fn((event: string, cb: Function) => {
-      if (event === 'data') cb(Buffer.from(JSON.stringify(activity)));
-      if (event === 'end') cb();
-    }),
+    headers: { 'content-type': 'application/json', authorization: 'Bearer test' },
   };
   const res = {
     socket: null,
     writeHead: vi.fn(),
     setHeader: vi.fn(),
     end: vi.fn(),
+    writableEnded: false,
   };
 
-  await capturedHandler!(req, res);
+  // The shared server pre-parses the body and passes it as third arg
+  await handler(req, res, activity);
 
   // Now invoke the captured bot logic with a TurnContext
   const context = makeTurnContext(activity);
@@ -148,32 +149,37 @@ describe('TeamsChannel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     lastProcessLogic = null;
-    capturedHandler = null;
+    registeredRoutes.length = 0;
   });
 
   describe('connect', () => {
-    it('starts HTTP server on the configured port', async () => {
+    it('registers routes on the shared HTTP server', async () => {
       const opts = createTestOpts();
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
+      const channel = new TeamsChannel(opts, 'app-id', 'app-pass');
       await channel.connect();
 
-      expect(mockServerInstance.listen).toHaveBeenCalledWith(
-        3978,
-        expect.any(Function),
-      );
+      expect(registeredRoutes).toHaveLength(2);
+      expect(registeredRoutes[0]).toMatchObject({
+        method: 'POST',
+        path: '/api/messages',
+      });
+      expect(registeredRoutes[1]).toMatchObject({
+        method: 'GET',
+        path: '/api/teams/health',
+      });
       expect(channel.isConnected()).toBe(true);
     });
 
-    it('serves health endpoint', async () => {
+    it('serves Teams health endpoint', async () => {
       const opts = createTestOpts();
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
+      const channel = new TeamsChannel(opts, 'app-id', 'app-pass');
       await channel.connect();
 
+      const handler = getRouteHandler('GET', '/api/teams/health');
+      expect(handler).toBeDefined();
+
       const res = { writeHead: vi.fn(), end: vi.fn() };
-      await capturedHandler!(
-        { url: '/health', method: 'GET', headers: {} },
-        res,
-      );
+      await handler!({}, res, null);
 
       expect(res.writeHead).toHaveBeenCalledWith(200, {
         'Content-Type': 'application/json',
@@ -182,26 +188,12 @@ describe('TeamsChannel', () => {
         JSON.stringify({ status: 'ok', connected: true }),
       );
     });
-
-    it('returns 404 for unknown routes', async () => {
-      const opts = createTestOpts();
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
-      await channel.connect();
-
-      const res = { writeHead: vi.fn(), end: vi.fn() };
-      await capturedHandler!(
-        { url: '/unknown', method: 'GET', headers: {} },
-        res,
-      );
-
-      expect(res.writeHead).toHaveBeenCalledWith(404);
-    });
   });
 
   describe('message handling', () => {
     it('delivers message for registered conversation', async () => {
       const opts = createTestOpts();
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
+      const channel = new TeamsChannel(opts, 'app-id', 'app-pass');
       await channel.connect();
 
       const activity = makeActivity();
@@ -231,7 +223,7 @@ describe('TeamsChannel', () => {
       const opts = createTestOpts({
         registeredGroups: vi.fn(() => ({})),
       });
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
+      const channel = new TeamsChannel(opts, 'app-id', 'app-pass');
       await channel.connect();
 
       const activity = makeActivity({
@@ -255,7 +247,7 @@ describe('TeamsChannel', () => {
       const opts = createTestOpts({
         registeredGroups: vi.fn(() => ({})),
       });
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
+      const channel = new TeamsChannel(opts, 'app-id', 'app-pass');
       await channel.connect();
 
       const activity = makeActivity({
@@ -279,7 +271,7 @@ describe('TeamsChannel', () => {
 
     it('does not re-register already registered conversations', async () => {
       const opts = createTestOpts();
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
+      const channel = new TeamsChannel(opts, 'app-id', 'app-pass');
       await channel.connect();
 
       await simulateIncomingMessage(makeActivity());
@@ -289,7 +281,7 @@ describe('TeamsChannel', () => {
 
     it('strips <at> mention tags from text', async () => {
       const opts = createTestOpts();
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
+      const channel = new TeamsChannel(opts, 'app-id', 'app-pass');
       await channel.connect();
 
       const activity = makeActivity({
@@ -305,7 +297,7 @@ describe('TeamsChannel', () => {
 
     it('ignores messages with only mention tags (no real text)', async () => {
       const opts = createTestOpts();
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
+      const channel = new TeamsChannel(opts, 'app-id', 'app-pass');
       await channel.connect();
 
       const activity = makeActivity({ text: '<at>Claw</at>  ' });
@@ -317,7 +309,7 @@ describe('TeamsChannel', () => {
 
     it('ignores non-message activities', async () => {
       const opts = createTestOpts();
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
+      const channel = new TeamsChannel(opts, 'app-id', 'app-pass');
       await channel.connect();
 
       const activity = makeActivity({
@@ -341,7 +333,7 @@ describe('TeamsChannel', () => {
           },
         })),
       });
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
+      const channel = new TeamsChannel(opts, 'app-id', 'app-pass');
       await channel.connect();
 
       const activity = makeActivity({
@@ -364,7 +356,7 @@ describe('TeamsChannel', () => {
 
     it('identifies DMs correctly', async () => {
       const opts = createTestOpts();
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
+      const channel = new TeamsChannel(opts, 'app-id', 'app-pass');
       await channel.connect();
 
       const activity = makeActivity({
@@ -388,7 +380,7 @@ describe('TeamsChannel', () => {
   describe('sendMessage', () => {
     it('sends via continueConversationAsync with stored reference', async () => {
       const opts = createTestOpts();
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
+      const channel = new TeamsChannel(opts, 'app-id', 'app-pass');
       await channel.connect();
 
       // Receive a message first to store the conversation reference
@@ -416,7 +408,7 @@ describe('TeamsChannel', () => {
 
     it('warns when no conversation reference exists', async () => {
       const opts = createTestOpts();
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
+      const channel = new TeamsChannel(opts, 'app-id', 'app-pass');
       await channel.connect();
 
       const { logger } = await import('../logger.js');
@@ -433,13 +425,13 @@ describe('TeamsChannel', () => {
 
   describe('ownsJid', () => {
     it('owns teams: prefixed JIDs', () => {
-      const channel = new TeamsChannel(createTestOpts(), 'a', 'b', 3978);
+      const channel = new TeamsChannel(createTestOpts(), 'a', 'b');
       expect(channel.ownsJid('teams:19:abc@thread.tacv2')).toBe(true);
       expect(channel.ownsJid('teams:direct-message-id')).toBe(true);
     });
 
     it('does not own non-teams JIDs', () => {
-      const channel = new TeamsChannel(createTestOpts(), 'a', 'b', 3978);
+      const channel = new TeamsChannel(createTestOpts(), 'a', 'b');
       expect(channel.ownsJid('12345@g.us')).toBe(false);
       expect(channel.ownsJid('tg:12345')).toBe(false);
       expect(channel.ownsJid('slack:C123')).toBe(false);
@@ -447,21 +439,20 @@ describe('TeamsChannel', () => {
   });
 
   describe('disconnect', () => {
-    it('closes the HTTP server', async () => {
+    it('marks channel as disconnected', async () => {
       const opts = createTestOpts();
-      const channel = new TeamsChannel(opts, 'app-id', 'app-pass', 3978);
+      const channel = new TeamsChannel(opts, 'app-id', 'app-pass');
       await channel.connect();
       expect(channel.isConnected()).toBe(true);
 
       await channel.disconnect();
       expect(channel.isConnected()).toBe(false);
-      expect(mockServerInstance.close).toHaveBeenCalled();
     });
   });
 
   describe('setTyping', () => {
     it('is a no-op (Teams has no typing API)', async () => {
-      const channel = new TeamsChannel(createTestOpts(), 'a', 'b', 3978);
+      const channel = new TeamsChannel(createTestOpts(), 'a', 'b');
       await channel.connect();
       await expect(
         channel.setTyping('teams:conv', true),
@@ -471,7 +462,7 @@ describe('TeamsChannel', () => {
 
   describe('channel properties', () => {
     it('has name "teams"', () => {
-      const channel = new TeamsChannel(createTestOpts(), 'a', 'b', 3978);
+      const channel = new TeamsChannel(createTestOpts(), 'a', 'b');
       expect(channel.name).toBe('teams');
     });
   });
