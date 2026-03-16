@@ -357,8 +357,23 @@ export class TeamsChannel implements Channel {
     }
   }
 
-  async setTyping(_jid: string, _isTyping: boolean): Promise<void> {
-    // Teams Bot API has no typing indicator endpoint — no-op
+  async setTyping(jid: string, isTyping: boolean): Promise<void> {
+    if (!isTyping) return; // Teams typing auto-expires; no explicit "stop" needed
+
+    const ref = this.conversationRefs.get(jid);
+    if (!ref) return;
+
+    try {
+      await this.adapter.continueConversationAsync(
+        this.appId,
+        ref as ConversationReference,
+        async (context) => {
+          await context.sendActivity({ type: 'typing' });
+        },
+      );
+    } catch (err) {
+      logger.debug({ jid, error: err }, 'Failed to send typing indicator');
+    }
   }
 }
 
