@@ -80,6 +80,14 @@ export const WEBHOOK_TOKENS_PATH = path.join(
   'nanoclaw',
   'webhook-tokens.json',
 );
+export const ALERT_BATCH_WINDOW_MS = parseInt(
+  process.env.ALERT_BATCH_WINDOW_MS || '60000',
+  10,
+);
+export const ALERT_NOISY_THRESHOLD_24H = parseInt(
+  process.env.ALERT_NOISY_THRESHOLD_24H || '50',
+  10,
+);
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(

@@ -333,6 +333,162 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+// --- Alert subscription tools ---
+
+server.tool(
+  'alert_subscribe',
+  `Subscribe this group to receive alerts matching specific patterns. Multiple patterns are AND'd together.
+
+Patterns match against alert fields: severity, resource, type, category, host, environment, location, or tags.keyName.
+Operators: eq (exact match), regex, glob (* wildcard), lt (less than), gt (greater than).
+
+Examples:
+- All critical production alerts: [{"field":"severity","operator":"lt","value":"3"},{"field":"environment","operator":"eq","value":"production"}]
+- Anything affecting our API: [{"field":"resource","operator":"glob","value":"*api*"}]
+- Platform team resources: [{"field":"tags.team","operator":"eq","value":"platform"}]`,
+  {
+    patterns: z.array(z.object({
+      field: z.string().describe('Alert field: severity, resource, type, category, host, environment, location, or tags.{key}'),
+      operator: z.enum(['eq', 'regex', 'glob', 'lt', 'gt']),
+      value: z.string(),
+    })).describe('Array of patterns — ALL must match (AND logic)'),
+    min_severity: z.number().optional().describe('Only receive alerts with severity <= this value (1=most severe). Default: no filter.'),
+  },
+  async (args) => {
+    const data = {
+      type: 'alert_subscribe',
+      groupJid: chatJid,
+      groupFolder,
+      patterns: args.patterns,
+      minSeverity: args.min_severity,
+      isProtected: false,
+      createdBy: 'self',
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return { content: [{ type: 'text' as const, text: 'Subscription created. You\'ll receive alerts matching your patterns.' }] };
+  },
+);
+
+server.tool(
+  'alert_unsubscribe',
+  'Remove an alert subscription. Protected subscriptions (assigned by main channel) cannot be removed by the group.',
+  { subscription_id: z.string().describe('The subscription ID to remove') },
+  async (args) => {
+    const data = {
+      type: 'alert_unsubscribe',
+      subscriptionId: args.subscription_id,
+      groupFolder,
+      isMain,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Unsubscribe requested for ${args.subscription_id}.` }] };
+  },
+);
+
+server.tool(
+  'alert_subscribe_protected',
+  'Assign a protected alert subscription to a group. Only the main channel can create or remove protected subscriptions.',
+  {
+    target_group_jid: z.string().describe('JID of the group to assign the subscription to'),
+    patterns: z.array(z.object({
+      field: z.string(),
+      operator: z.enum(['eq', 'regex', 'glob', 'lt', 'gt']),
+      value: z.string(),
+    })),
+    min_severity: z.number().optional(),
+  },
+  async (args) => {
+    if (!isMain) {
+      return { content: [{ type: 'text' as const, text: 'Only the main group can create protected subscriptions.' }], isError: true };
+    }
+    const data = {
+      type: 'alert_subscribe',
+      groupJid: args.target_group_jid,
+      groupFolder: args.target_group_jid,
+      patterns: args.patterns,
+      minSeverity: args.min_severity,
+      isProtected: true,
+      createdBy: groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return { content: [{ type: 'text' as const, text: 'Protected subscription assigned.' }] };
+  },
+);
+
+server.tool(
+  'alert_list_subscriptions',
+  'List alert subscriptions for this group (or all groups if main).',
+  {},
+  async () => {
+    const subsFile = path.join(IPC_DIR, 'alert_subscriptions.json');
+    try {
+      if (!fs.existsSync(subsFile)) {
+        return { content: [{ type: 'text' as const, text: 'No alert subscriptions found.' }] };
+      }
+      const allSubs = JSON.parse(fs.readFileSync(subsFile, 'utf-8'));
+      const subs = isMain ? allSubs : allSubs.filter((s: { groupFolder: string }) => s.groupFolder === groupFolder);
+      if (subs.length === 0) return { content: [{ type: 'text' as const, text: 'No alert subscriptions.' }] };
+
+      const formatted = subs.map((s: { id: string; isProtected: boolean; patterns: object[]; minSeverity?: number }) =>
+        `- [${s.id}] ${s.isProtected ? 'PROTECTED ' : ''}${JSON.stringify(s.patterns)} ${s.minSeverity ? `(min sev: ${s.minSeverity})` : ''}`
+      ).join('\n');
+      return { content: [{ type: 'text' as const, text: `Alert subscriptions:\n${formatted}` }] };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `Error: ${err}` }] };
+    }
+  },
+);
+
+server.tool(
+  'alert_suppress',
+  'Suppress a noisy alert fingerprint. No investigations will be triggered for this alert type until the suppression expires.',
+  {
+    fingerprint: z.string().describe('Alert fingerprint to suppress'),
+    duration_hours: z.number().describe('How many hours to suppress (0 = indefinite)'),
+    reason: z.string().describe('Why this alert is being suppressed'),
+  },
+  async (args) => {
+    const data = {
+      type: 'alert_suppress',
+      fingerprint: args.fingerprint,
+      durationHours: args.duration_hours,
+      reason: args.reason,
+      groupFolder,
+      isMain,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Suppression requested for ${args.fingerprint.slice(0, 12)}...` }] };
+  },
+);
+
+server.tool(
+  'alert_history',
+  'Query alert history. Search by text, fingerprint, resource, or time range.',
+  {
+    query: z.string().optional().describe('Text search query (FTS on summary, description, type, resource)'),
+    fingerprint: z.string().optional().describe('Exact fingerprint to look up'),
+    hours: z.number().default(24).describe('How many hours back to search (default: 24)'),
+    limit: z.number().default(20).describe('Max results (default: 20)'),
+  },
+  async (args) => {
+    const data = {
+      type: 'alert_history_query',
+      query: args.query,
+      fingerprint: args.fingerprint,
+      hours: args.hours,
+      limit: args.limit,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return { content: [{ type: 'text' as const, text: 'Alert history query submitted. Results will appear in /workspace/ipc/alert_history_result.json' }] };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

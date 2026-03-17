@@ -816,3 +816,31 @@ export function writeGroupsSnapshot(
     ),
   );
 }
+
+/**
+ * Write alert subscriptions snapshot for the container to read.
+ * Main sees all subscriptions; others see only their own.
+ */
+export function writeSubscriptionsSnapshot(
+  groupFolder: string,
+  isMain: boolean,
+  subscriptions: Array<{
+    id: string;
+    groupJid: string;
+    groupFolder: string;
+    patterns: unknown[];
+    isProtected: boolean;
+    minSeverity?: number;
+    createdAt: string;
+  }>,
+): void {
+  const groupIpcDir = resolveGroupIpcPath(groupFolder);
+  fs.mkdirSync(groupIpcDir, { recursive: true });
+
+  const filtered = isMain
+    ? subscriptions
+    : subscriptions.filter((s) => s.groupFolder === groupFolder);
+
+  const subsFile = path.join(groupIpcDir, 'alert_subscriptions.json');
+  fs.writeFileSync(subsFile, JSON.stringify(filtered, null, 2));
+}

@@ -14,6 +14,11 @@ import {
 
 let db: Database.Database;
 
+/** Access the raw database instance. Only for internal modules (alert-db). */
+export function getDb(): Database.Database {
+  return db;
+}
+
 function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
@@ -83,6 +88,113 @@ function createSchema(database: Database.Database): void {
       requires_trigger INTEGER DEFAULT 1
     );
   `);
+
+  // --- Alert system tables ---
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS alerts (
+      id TEXT PRIMARY KEY,
+      fingerprint TEXT NOT NULL,
+      external_id TEXT,
+      source TEXT NOT NULL,
+      source_url TEXT,
+      type TEXT NOT NULL,
+      category TEXT NOT NULL,
+      severity INTEGER NOT NULL,
+      assessed_priority INTEGER,
+      status TEXT NOT NULL DEFAULT 'firing',
+      resource TEXT NOT NULL,
+      resource_type TEXT,
+      host TEXT,
+      host_type TEXT,
+      location TEXT,
+      environment TEXT,
+      fired_at TEXT NOT NULL,
+      received_at TEXT NOT NULL,
+      resolved_at TEXT,
+      summary TEXT NOT NULL,
+      description TEXT,
+      metric_value TEXT,
+      threshold TEXT,
+      tags TEXT,
+      metadata TEXT,
+      context_id TEXT,
+      suppressed_until TEXT,
+      investigation_status TEXT DEFAULT 'pending',
+      investigation_summary TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_alerts_fingerprint ON alerts(fingerprint);
+    CREATE INDEX IF NOT EXISTS idx_alerts_fingerprint_time ON alerts(fingerprint, received_at);
+    CREATE INDEX IF NOT EXISTS idx_alerts_source ON alerts(source);
+    CREATE INDEX IF NOT EXISTS idx_alerts_type ON alerts(type);
+    CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity);
+    CREATE INDEX IF NOT EXISTS idx_alerts_resource ON alerts(resource);
+    CREATE INDEX IF NOT EXISTS idx_alerts_category ON alerts(category);
+    CREATE INDEX IF NOT EXISTS idx_alerts_environment ON alerts(environment);
+    CREATE INDEX IF NOT EXISTS idx_alerts_location ON alerts(location);
+    CREATE INDEX IF NOT EXISTS idx_alerts_host ON alerts(host);
+    CREATE INDEX IF NOT EXISTS idx_alerts_status_investigation ON alerts(investigation_status, received_at);
+    CREATE INDEX IF NOT EXISTS idx_alerts_context ON alerts(context_id);
+    CREATE INDEX IF NOT EXISTS idx_alerts_received ON alerts(received_at);
+
+    CREATE TABLE IF NOT EXISTS alert_contexts (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      closed_at TEXT,
+      status TEXT NOT NULL DEFAULT 'open',
+      summary TEXT,
+      alert_count INTEGER DEFAULT 0,
+      primary_severity INTEGER DEFAULT 5
+    );
+
+    CREATE TABLE IF NOT EXISTS alert_subscriptions (
+      id TEXT PRIMARY KEY,
+      group_jid TEXT NOT NULL,
+      group_folder TEXT NOT NULL,
+      patterns TEXT NOT NULL,
+      is_protected INTEGER DEFAULT 0,
+      created_by TEXT NOT NULL,
+      min_severity INTEGER,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_alert_subs_group ON alert_subscriptions(group_jid);
+
+    CREATE TABLE IF NOT EXISTS alert_suppression_rules (
+      fingerprint TEXT PRIMARY KEY,
+      suppressed_until TEXT,
+      reason TEXT,
+      created_at TEXT NOT NULL,
+      created_by TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS alert_knowledge (
+      fingerprint TEXT PRIMARY KEY,
+      alert_type TEXT NOT NULL,
+      resource_pattern TEXT,
+      investigation_count INTEGER DEFAULT 1,
+      last_investigated TEXT,
+      knowledge TEXT,
+      runbook_url TEXT,
+      typical_priority INTEGER,
+      typical_resolution TEXT,
+      auto_suppress INTEGER DEFAULT 0
+    );
+  `);
+
+  // FTS5 virtual table for alert text search (separate exec — virtual tables can't share exec block)
+  try {
+    database.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS alert_fts USING fts5(
+        id UNINDEXED,
+        summary,
+        description,
+        type,
+        resource,
+        tokenize='trigram'
+      );
+    `);
+  } catch {
+    /* FTS5 already exists or not available */
+  }
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
   try {

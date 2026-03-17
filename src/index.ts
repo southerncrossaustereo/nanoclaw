@@ -55,6 +55,9 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import { startMaintenanceLoop } from './alert-maintenance.js';
+import { startAlertProcessor } from './alert-processor.js';
+import { registerAlertWebhooks } from './alert-webhooks.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -489,6 +492,7 @@ async function main(): Promise<void> {
   );
 
   // Start shared HTTP server — channels and subsystems register routes against this
+  registerAlertWebhooks();
   await startHttpServer(HTTP_SERVER_PORT);
 
   // Graceful shutdown handlers
@@ -592,6 +596,32 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
   });
+  startAlertProcessor({
+    registeredGroups: () => registeredGroups,
+    getSessions: () => sessions,
+    setSessions: (folder, sessionId) => {
+      sessions[folder] = sessionId;
+    },
+    queue,
+    onProcess: (groupJid, proc, containerName, groupFolder) =>
+      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    sendMessage: async (jid, rawText) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) {
+        logger.warn({ jid }, 'No channel owns JID, cannot send alert notification');
+        return;
+      }
+      const text = formatOutbound(rawText);
+      if (text) await channel.sendMessage(jid, text);
+    },
+    getMainGroup: () => {
+      for (const [jid, group] of Object.entries(registeredGroups)) {
+        if (group.isMain) return { jid, group };
+      }
+      return null;
+    },
+  });
+  startMaintenanceLoop();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

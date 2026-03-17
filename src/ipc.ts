@@ -3,9 +3,16 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
+import { randomUUID } from 'crypto';
+
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createSubscription,
+  deleteSubscription,
+} from './alert-db.js';
+import { handleInvestigationComplete } from './alert-processor.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -171,7 +178,12 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
-  },
+    // For alert investigation
+    contextId?: string;
+    assessedPriority?: number;
+    summary?: string;
+    alertIds?: string[];
+  } & Record<string, unknown>,
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
   deps: IpcDeps,
@@ -448,6 +460,97 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'alert_investigation_complete':
+      if (data.contextId) {
+        handleInvestigationComplete(
+          {
+            contextId: data.contextId as string,
+            assessedPriority: data.assessedPriority as number | undefined,
+            summary: data.summary as string | undefined,
+            alertIds: data.alertIds as string[] | undefined,
+          },
+          { sendMessage: deps.sendMessage },
+        );
+        logger.info(
+          { contextId: data.contextId, sourceGroup },
+          'Alert investigation complete IPC processed',
+        );
+      }
+      break;
+
+    case 'alert_subscribe': {
+      const subGroupJid = (data as any).groupJid as string;
+      const patterns = (data as any).patterns;
+      if (!subGroupJid || !patterns) {
+        logger.warn({ data }, 'Invalid alert_subscribe request');
+        break;
+      }
+
+      // Resolve group folder from JID if needed
+      const subTargetGroup = registeredGroups[subGroupJid];
+      const subGroupFolder =
+        (data as any).groupFolder || subTargetGroup?.folder || sourceGroup;
+
+      const subId = randomUUID();
+      createSubscription({
+        id: subId,
+        groupJid: subGroupJid,
+        groupFolder: subGroupFolder,
+        patterns,
+        isProtected: (data as any).isProtected === true,
+        createdBy: (data as any).createdBy || sourceGroup,
+        minSeverity: (data as any).minSeverity,
+        createdAt: new Date().toISOString(),
+      });
+      logger.info(
+        { subId, groupJid: subGroupJid, sourceGroup },
+        'Alert subscription created via IPC',
+      );
+      break;
+    }
+
+    case 'alert_unsubscribe': {
+      const subIdToDelete = (data as any).subscriptionId as string;
+      if (!subIdToDelete) {
+        logger.warn({ data }, 'Invalid alert_unsubscribe request');
+        break;
+      }
+      const deleted = deleteSubscription(subIdToDelete, isMain);
+      if (!deleted) {
+        logger.warn(
+          { subId: subIdToDelete, sourceGroup },
+          'Cannot delete protected subscription (not main)',
+        );
+      } else {
+        logger.info(
+          { subId: subIdToDelete, sourceGroup },
+          'Alert subscription deleted via IPC',
+        );
+      }
+      break;
+    }
+
+    case 'alert_suppress': {
+      const { suppressAlert } = await import('./alert-db.js');
+      const fp = (data as any).fingerprint as string;
+      const hours = (data as any).durationHours as number;
+      const reason = (data as any).reason as string;
+      if (!fp || !reason) {
+        logger.warn({ data }, 'Invalid alert_suppress request');
+        break;
+      }
+      const until =
+        hours > 0
+          ? new Date(Date.now() + hours * 3600000).toISOString()
+          : null;
+      suppressAlert(fp, until, reason, sourceGroup);
+      logger.info(
+        { fingerprint: fp, hours, sourceGroup },
+        'Alert suppression created via IPC',
+      );
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
