@@ -94,16 +94,22 @@ cd /app && npx tsc --outDir /tmp/dist 2>&1 >&2
 ln -s /app/node_modules /tmp/dist/node_modules
 chmod -R a-w /tmp/dist
 
+# Authenticate Azure CLI via service principal if credentials are provided
+if [ -n "${AZURE_CLIENT_ID:-}" ] && [ -n "${AZURE_CLIENT_SECRET:-}" ] && [ -n "${AZURE_TENANT_ID:-}" ]; then
+  az login --service-principal \
+    -u "$AZURE_CLIENT_ID" \
+    -p "$AZURE_CLIENT_SECRET" \
+    -t "$AZURE_TENANT_ID" \
+    --output none 2>&1 >&2 && echo "Azure: authenticated as service principal" >&2 || echo "Azure: login failed" >&2
+fi
+
 # Authenticate Atlassian CLI if credentials are provided.
 # Service account tokens (ATSTT prefix) use Bearer auth via atlassian-api wrapper.
 # Classic API tokens use acli's built-in basic auth login.
 if [ -n "${ACLI_TOKEN:-}" ] && [ -n "${ACLI_SITE:-}" ] && [ -n "${ACLI_EMAIL:-}" ]; then
   if echo "$ACLI_TOKEN" | grep -q "^ATSTT"; then
-    # Service account token — acli doesn't support these natively.
-    # The atlassian-api wrapper script handles Bearer auth.
     echo "Atlassian: service account token detected, using atlassian-api wrapper" >&2
   else
-    # Classic API token — authenticate via acli
     echo "$ACLI_TOKEN" | acli jira auth login --site "$ACLI_SITE" --email "$ACLI_EMAIL" --token 2>&1 >&2 || true
     echo "$ACLI_TOKEN" | acli confluence auth login --site "$ACLI_SITE" --email "$ACLI_EMAIL" --token 2>&1 >&2 || true
   fi

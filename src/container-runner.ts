@@ -8,7 +8,6 @@ import path from 'path';
 
 import {
   ATLASSIAN_TOKENS_PATH,
-  AZURE_CONFIG_DIR,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
@@ -35,6 +34,7 @@ import {
   resolveSecrets,
   SecretProvider,
 } from './secret-provider.js';
+import { readEnvFile } from './env.js';
 import { RegisteredGroup } from './types.js';
 
 let secretProvider: SecretProvider | null = null;
@@ -220,14 +220,8 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Azure CLI: mount host ~/.azure/ read-only so `az` inherits the host session
-  if (group.containerConfig?.azureAccess && fs.existsSync(AZURE_CONFIG_DIR)) {
-    mounts.push({
-      hostPath: AZURE_CONFIG_DIR,
-      containerPath: '/home/node/.azure',
-      readonly: true,
-    });
-  }
+  // Azure CLI: no longer mounts host ~/.azure/ — service principal auth
+  // is injected via env vars and `az login` runs in the entrypoint.
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
@@ -300,9 +294,35 @@ async function loadAtlassianCredentials(
   );
 }
 
+export interface AzureSpCredentials {
+  tenantId: string;
+  clientId: string;
+  clientSecret: string;
+}
+
+/**
+ * Load Azure service principal credentials from environment/.env.
+ * These are the same creds used by the host for Key Vault access.
+ */
+function loadAzureSpCredentials(): AzureSpCredentials | null {
+  const envVars = readEnvFile([
+    'AZURE_TENANT_ID',
+    'AZURE_CLIENT_ID',
+    'AZURE_CLIENT_SECRET',
+  ]);
+  const tenantId = process.env.AZURE_TENANT_ID || envVars.AZURE_TENANT_ID;
+  const clientId = process.env.AZURE_CLIENT_ID || envVars.AZURE_CLIENT_ID;
+  const clientSecret =
+    process.env.AZURE_CLIENT_SECRET || envVars.AZURE_CLIENT_SECRET;
+
+  if (!tenantId || !clientId || !clientSecret) return null;
+  return { tenantId, clientId, clientSecret };
+}
+
 interface ToolCredentials {
   githubToken?: string | null;
   atlassianCreds?: AtlassianCredentials | null;
+  azureCreds?: AzureSpCredentials | null;
 }
 
 function buildContainerArgs(
@@ -347,6 +367,11 @@ function buildContainerArgs(
     if (creds.atlassianCreds.cloudId) {
       args.push('-e', `ATLASSIAN_CLOUD_ID=${creds.atlassianCreds.cloudId}`);
     }
+  }
+  if (creds?.azureCreds) {
+    args.push('-e', `AZURE_TENANT_ID=${creds.azureCreds.tenantId}`);
+    args.push('-e', `AZURE_CLIENT_ID=${creds.azureCreds.clientId}`);
+    args.push('-e', `AZURE_CLIENT_SECRET=${creds.azureCreds.clientSecret}`);
   }
 
   // Runtime-specific args for host gateway resolution
@@ -395,6 +420,9 @@ export async function runContainerAgent(
       : null,
     atlassianCreds: group.containerConfig?.atlassianAccess
       ? await loadAtlassianCredentials(group.folder)
+      : null,
+    azureCreds: group.containerConfig?.azureAccess
+      ? loadAzureSpCredentials()
       : null,
   };
   const containerArgs = buildContainerArgs(mounts, containerName, creds);
