@@ -55,7 +55,7 @@ case "${1:-}" in
       exit 1
     fi
     ENCODED_JQL=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$JQL'))" 2>/dev/null || echo "$JQL")
-    URL="${GATEWAY}/ex/jira/${ATLASSIAN_CLOUD_ID}/rest/api/3/search?jql=${ENCODED_JQL}&maxResults=${3:-20}"
+    URL="${GATEWAY}/ex/jira/${ATLASSIAN_CLOUD_ID}/rest/api/3/search/jql?jql=${ENCODED_JQL}&maxResults=${3:-20}"
     METHOD="GET"
     BODY=""
     ;;
