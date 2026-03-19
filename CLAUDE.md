@@ -18,7 +18,9 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
-| `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
+| `groups/_templates/main/CLAUDE.md` | Template for main group CLAUDE.md (tracked in git) |
+| `groups/_templates/global/CLAUDE.md` | Template for global CLAUDE.md (tracked in git) |
+| `groups/{name}/CLAUDE.md` | Per-group memory (isolated, gitignored) |
 | `container/tool-docs/*.md` | CLI tool documentation snippets, injected per-group based on `containerConfig` flags |
 | `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
 
@@ -55,6 +57,24 @@ systemctl --user start nanoclaw
 systemctl --user stop nanoclaw
 systemctl --user restart nanoclaw
 ```
+
+## Group Templates
+
+Operational group folders (`groups/main/`, `groups/global/`, etc.) are gitignored — they contain per-installation state and memory. Tracked templates live in `groups/_templates/`:
+
+- `groups/_templates/main/CLAUDE.md` — template for the main (admin) group
+- `groups/_templates/global/CLAUDE.md` — template for global shared context (injected into all non-main groups)
+
+Templates use `{{PLACEHOLDER}}` syntax for instance-specific values:
+
+| Placeholder | Replace with |
+|-------------|-------------|
+| `{{ASSISTANT_NAME}}` | The bot's name (e.g., `Claw`) |
+| `{{CHANNEL_NAME}}` | Primary channel (e.g., `Microsoft Teams`, `WhatsApp`) |
+| `{{CHANNEL_PREFIX}}` | JID prefix (e.g., `teams`, `whatsapp`, `telegram`) |
+| `{{GROUP_FOLDER}}` | The main group's folder name |
+
+On fresh deploy, copy templates to operational paths and fill in placeholders. The `/setup` skill handles this automatically.
 
 ## Adding CLI Tools to Containers
 

@@ -9,14 +9,9 @@ store/
 data/
 logs/
 
-# Groups - only track base structure and specific CLAUDE.md files
+# Groups - operational folders are per-installation, templates are tracked
 groups/*
-!groups/main/
-!groups/global/
-groups/main/*
-groups/global/*
-!groups/main/CLAUDE.md
-!groups/global/CLAUDE.md
+!groups/_templates/
 
 # Secrets
 *.keys.json
