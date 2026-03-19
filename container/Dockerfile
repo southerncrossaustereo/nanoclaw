@@ -79,7 +79,7 @@ RUN if [ -f /usr/local/share/nanoclaw-scripts/atlassian-api ]; then \
     fi
 
 # Create workspace directories
-RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input /workspace/ipc/conversations
 
 # Create entrypoint script
 # Container input (prompt, group info) is passed via stdin JSON.

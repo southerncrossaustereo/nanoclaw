@@ -16,6 +16,7 @@ import {
   GITHUB_TOKENS_PATH,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  MAX_WORKSPACE_SIZE,
   TIMEZONE,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
@@ -134,6 +135,16 @@ function buildVolumeMounts(
     }
   }
 
+  // Conversation archives: mount read-only so agents can read but not delete.
+  // New archives are written via IPC and moved here by the host.
+  const conversationsDir = path.join(groupDir, 'conversations');
+  fs.mkdirSync(conversationsDir, { recursive: true });
+  mounts.push({
+    hostPath: conversationsDir,
+    containerPath: '/workspace/group/conversations',
+    readonly: true,
+  });
+
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const groupSessionsDir = path.join(
@@ -190,6 +201,7 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'conversations'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -400,6 +412,28 @@ function buildContainerArgs(
   return args;
 }
 
+function getDirectorySize(dirPath: string): number {
+  let total = 0;
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        total += getDirectorySize(fullPath);
+      } else if (entry.isFile()) {
+        try {
+          total += fs.statSync(fullPath).size;
+        } catch {
+          /* race condition or permission error */
+        }
+      }
+    }
+  } catch {
+    /* directory may not exist yet */
+  }
+  return total;
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -410,6 +444,32 @@ export async function runContainerAgent(
 
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
+
+  // Workspace size check
+  const maxSize =
+    group.containerConfig?.maxWorkspaceSize || MAX_WORKSPACE_SIZE;
+  if (maxSize > 0) {
+    const currentSize = getDirectorySize(groupDir);
+    const sizeMB = (currentSize / 1024 / 1024).toFixed(1);
+    const limitMB = (maxSize / 1024 / 1024).toFixed(1);
+    if (currentSize > maxSize) {
+      logger.error(
+        { group: group.name, sizeMB, limitMB },
+        'Workspace exceeds size limit',
+      );
+      return {
+        status: 'error',
+        result: null,
+        error: `Workspace is ${sizeMB}MB, exceeding the ${limitMB}MB limit. Clean up files to continue.`,
+      };
+    }
+    if (currentSize > maxSize * 0.8) {
+      logger.warn(
+        { group: group.name, sizeMB, limitMB },
+        'Workspace approaching size limit',
+      );
+    }
+  }
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');

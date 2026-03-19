@@ -10,7 +10,10 @@ import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { createSubscription, deleteSubscription } from './alert-db.js';
 import { handleInvestigationComplete } from './alert-processor.js';
-import { isValidGroupFolder } from './group-folder.js';
+import {
+  isValidGroupFolder,
+  resolveGroupFolderPath,
+} from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -147,6 +150,43 @@ export function startIpcWatcher(deps: IpcDeps): void {
         }
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+      }
+
+      // Move conversation archives from IPC to the protected group conversations dir
+      const conversationsIpcDir = path.join(
+        ipcBaseDir,
+        sourceGroup,
+        'conversations',
+      );
+      try {
+        if (fs.existsSync(conversationsIpcDir)) {
+          const convFiles = fs
+            .readdirSync(conversationsIpcDir)
+            .filter((f) => f.endsWith('.md'));
+          for (const file of convFiles) {
+            const srcPath = path.join(conversationsIpcDir, file);
+            const groupDir = resolveGroupFolderPath(sourceGroup);
+            const dstDir = path.join(groupDir, 'conversations');
+            fs.mkdirSync(dstDir, { recursive: true });
+            const dstPath = path.join(dstDir, file);
+            try {
+              fs.renameSync(srcPath, dstPath);
+            } catch {
+              // Cross-device: copy then delete
+              fs.copyFileSync(srcPath, dstPath);
+              fs.unlinkSync(srcPath);
+            }
+            logger.debug(
+              { file, sourceGroup },
+              'Conversation archive moved to protected dir',
+            );
+          }
+        }
+      } catch (err) {
+        logger.error(
+          { err, sourceGroup },
+          'Error processing IPC conversations',
+        );
       }
     }
 

@@ -33,6 +33,7 @@ export interface ContainerConfig {
   githubAccess?: boolean; // Enable gh CLI — token loaded from ~/.config/nanoclaw/github-tokens.json
   azureAccess?: boolean; // Enable az CLI — mounts host ~/.azure/ read-only
   atlassianAccess?: boolean; // Enable acli — credentials from ~/.config/nanoclaw/atlassian-tokens.json
+  maxWorkspaceSize?: number; // Per-group override for MAX_WORKSPACE_SIZE (bytes)
 }
 
 export interface RegisteredGroup {
