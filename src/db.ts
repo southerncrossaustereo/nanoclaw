@@ -699,18 +699,15 @@ export function endSessionHistory(
   summary?: string,
   messageCount?: number,
 ): void {
-  const updates: string[] = [
-    "ended_at = ?",
-    "status = ?",
-  ];
+  const updates: string[] = ['ended_at = ?', 'status = ?'];
   const params: unknown[] = [new Date().toISOString(), status];
 
   if (summary !== undefined) {
-    updates.push("summary = ?");
+    updates.push('summary = ?');
     params.push(summary);
   }
   if (messageCount !== undefined) {
-    updates.push("message_count = ?");
+    updates.push('message_count = ?');
     params.push(messageCount);
   }
 

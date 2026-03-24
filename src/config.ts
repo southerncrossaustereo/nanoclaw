@@ -31,11 +31,11 @@ export const MOUNT_ALLOWLIST_PATH = path.join(
   'nanoclaw',
   'mount-allowlist.json',
 );
-export const GITHUB_TOKENS_PATH = path.join(
+export const GITHUB_APP_CONFIG_PATH = path.join(
   HOME_DIR,
   '.config',
   'nanoclaw',
-  'github-tokens.json',
+  'github-app.json',
 );
 export const ATLASSIAN_TOKENS_PATH = path.join(
   HOME_DIR,
