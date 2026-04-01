@@ -132,6 +132,16 @@ export function getRecentAlerts(since: string, limit = 50): NormalizedAlert[] {
   return rows.map(rowToAlert);
 }
 
+export function getPendingAlerts(): NormalizedAlert[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      "SELECT * FROM alerts WHERE investigation_status IN ('pending', 'batching') AND severity <= 4 ORDER BY received_at ASC",
+    )
+    .all() as Record<string, unknown>[];
+  return rows.map(rowToAlert);
+}
+
 export function updateAlertInvestigation(
   id: string,
   status: string,
@@ -476,23 +486,26 @@ export function getCorrelatedAlerts(
   const db = getDb();
   const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
 
-  // Score alerts by shared attributes. Using a CASE-based scoring query.
+  // Score alerts by shared attributes. Wrap in subquery so the alias
+  // correlation_score can be filtered in the outer WHERE clause.
   const rows = db
     .prepare(
-      `SELECT *,
-        (CASE WHEN resource = ?1 THEN 2 ELSE 0 END) +
-        (CASE WHEN host = ?2 THEN 2 ELSE 0 END) +
-        (CASE WHEN location = ?3 THEN 1 ELSE 0 END) +
-        (CASE WHEN type = ?4 THEN 1 ELSE 0 END) +
-        (CASE WHEN environment = ?5 THEN 1 ELSE 0 END) +
-        (CASE WHEN category = ?6 THEN 1 ELSE 0 END)
-        AS correlation_score
-      FROM alerts
-      WHERE received_at > ?7
-        AND id != ?8
-        AND correlation_score > 0
+      `SELECT * FROM (
+        SELECT *,
+          (CASE WHEN resource = ? THEN 2 ELSE 0 END) +
+          (CASE WHEN host = ? THEN 2 ELSE 0 END) +
+          (CASE WHEN location = ? THEN 1 ELSE 0 END) +
+          (CASE WHEN type = ? THEN 1 ELSE 0 END) +
+          (CASE WHEN environment = ? THEN 1 ELSE 0 END) +
+          (CASE WHEN category = ? THEN 1 ELSE 0 END)
+          AS correlation_score
+        FROM alerts
+        WHERE received_at > ?
+          AND id != ?
+      )
+      WHERE correlation_score > 0
       ORDER BY correlation_score DESC, received_at DESC
-      LIMIT ?9`,
+      LIMIT ?`,
     )
     .all(
       alert.resource,
