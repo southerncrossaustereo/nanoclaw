@@ -7,7 +7,7 @@ import {
   normalizeGeneric,
 } from './alert-normalizers.js';
 import { ingestAlert } from './alert-ingestion.js';
-import { getRecentAlerts } from './alert-db.js';
+import { getRecentAlerts, getPendingAlerts } from './alert-db.js';
 import { logger } from './logger.js';
 
 function entraIdAuth(): HttpMiddleware {
@@ -76,57 +76,43 @@ export function registerAlertWebhooks(): void {
     azureAuth,
   );
 
-  registerRoute(
-    'POST',
-    '/alerts/jira',
-    async (_req, res, body) => {
-      try {
-        const normalized = normalizeJiraSM(body as Record<string, unknown>);
-        const alert = ingestAlert(normalized);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            status: 'accepted',
-            alertId: alert.id,
-            fingerprint: alert.fingerprint,
-          }),
-        );
-      } catch (err: any) {
-        logger.error(
-          { err: err.message },
-          'Jira SM alert normalization failed',
-        );
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
-      }
-    },
-  );
+  registerRoute('POST', '/alerts/jira', async (_req, res, body) => {
+    try {
+      const normalized = normalizeJiraSM(body as Record<string, unknown>);
+      const alert = ingestAlert(normalized);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          status: 'accepted',
+          alertId: alert.id,
+          fingerprint: alert.fingerprint,
+        }),
+      );
+    } catch (err: any) {
+      logger.error({ err: err.message }, 'Jira SM alert normalization failed');
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+  });
 
-  registerRoute(
-    'POST',
-    '/alerts/generic',
-    async (_req, res, body) => {
-      try {
-        const normalized = normalizeGeneric(body as Record<string, unknown>);
-        const alert = ingestAlert(normalized);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            status: 'accepted',
-            alertId: alert.id,
-            fingerprint: alert.fingerprint,
-          }),
-        );
-      } catch (err: any) {
-        logger.error(
-          { err: err.message },
-          'Generic alert normalization failed',
-        );
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
-      }
-    },
-  );
+  registerRoute('POST', '/alerts/generic', async (_req, res, body) => {
+    try {
+      const normalized = normalizeGeneric(body as Record<string, unknown>);
+      const alert = ingestAlert(normalized);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          status: 'accepted',
+          alertId: alert.id,
+          fingerprint: alert.fingerprint,
+        }),
+      );
+    } catch (err: any) {
+      logger.error({ err: err.message }, 'Generic alert normalization failed');
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+  });
 
   // Status endpoint — no auth, useful for debugging
   registerRoute('GET', '/alerts/status', async (_req, res) => {
@@ -134,10 +120,14 @@ export function registerAlertWebhooks(): void {
     const recent = getRecentAlerts(since1h, 100);
     const bySeverity: Record<string, number> = {};
     const bySource: Record<string, number> = {};
+    const byInvestigationStatus: Record<string, number> = {};
     for (const a of recent) {
       bySeverity[a.severity] = (bySeverity[a.severity] || 0) + 1;
       bySource[a.source] = (bySource[a.source] || 0) + 1;
+      const s = a.investigationStatus || 'unknown';
+      byInvestigationStatus[s] = (byInvestigationStatus[s] || 0) + 1;
     }
+    const pending = getPendingAlerts();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
       JSON.stringify({
@@ -146,6 +136,18 @@ export function registerAlertWebhooks(): void {
           total: recent.length,
           bySeverity,
           bySource,
+          byInvestigationStatus,
+        },
+        pendingInvestigations: {
+          count: pending.length,
+          alerts: pending.map((a) => ({
+            id: a.id,
+            type: a.type,
+            severity: a.severity,
+            status: a.status,
+            investigationStatus: a.investigationStatus,
+            firedAt: a.firedAt,
+          })),
         },
       }),
     );
