@@ -2,7 +2,11 @@ import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS, MAX_CONCURRENT_MESSAGES } from './config.js';
+import {
+  DATA_DIR,
+  MAX_CONCURRENT_CONTAINERS,
+  MAX_CONCURRENT_MESSAGES,
+} from './config.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -211,7 +215,12 @@ export class GroupQueue {
     this.activeMessageCount++;
 
     logger.debug(
-      { groupJid, reason, activeCount: this.activeCount, activeMessageCount: this.activeMessageCount },
+      {
+        groupJid,
+        reason,
+        activeCount: this.activeCount,
+        activeMessageCount: this.activeMessageCount,
+      },
       'Starting container for group',
     );
 
