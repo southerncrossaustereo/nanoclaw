@@ -191,6 +191,16 @@ function createSchema(database: Database.Database): void {
     );
   `);
 
+  // Channel conversation references for proactive messaging (survives restarts)
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS conversation_references (
+      jid TEXT PRIMARY KEY,
+      channel TEXT NOT NULL,
+      reference TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
   // FTS5 virtual table for alert text search (separate exec — virtual tables can't share exec block)
   try {
     database.exec(`
@@ -279,6 +289,33 @@ export function initDatabase(): void {
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
   createSchema(db);
+}
+
+// --- Conversation reference persistence ---
+
+export function saveConversationReference(
+  jid: string,
+  channel: string,
+  reference: Record<string, unknown>,
+): void {
+  db.prepare(
+    `INSERT INTO conversation_references (jid, channel, reference, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(jid) DO UPDATE SET
+       reference = excluded.reference,
+       updated_at = excluded.updated_at`,
+  ).run(jid, channel, JSON.stringify(reference), new Date().toISOString());
+}
+
+export function loadConversationReferences(
+  channel: string,
+): Array<{ jid: string; reference: Record<string, unknown> }> {
+  const rows = db
+    .prepare(
+      `SELECT jid, reference FROM conversation_references WHERE channel = ?`,
+    )
+    .all(channel) as Array<{ jid: string; reference: string }>;
+  return rows.map((r) => ({ jid: r.jid, reference: JSON.parse(r.reference) }));
 }
 
 /**

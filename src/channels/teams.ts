@@ -8,6 +8,10 @@ import {
 import { IncomingMessage, ServerResponse } from 'http';
 
 import { ASSISTANT_NAME } from '../config.js';
+import {
+  saveConversationReference,
+  loadConversationReferences,
+} from '../db.js';
 import { readEnvFile } from '../env.js';
 import { registerRoute } from '../http-server.js';
 import { logger } from '../logger.js';
@@ -163,6 +167,21 @@ export class TeamsChannel implements Channel {
       res.end(JSON.stringify({ status: 'ok', connected: this.connected }));
     });
 
+    // Restore conversation references from DB so proactive messaging works after restart
+    const savedRefs = loadConversationReferences('teams');
+    for (const { jid, reference } of savedRefs) {
+      this.conversationRefs.set(
+        jid,
+        reference as Partial<ConversationReference>,
+      );
+    }
+    if (savedRefs.length > 0) {
+      logger.info(
+        { count: savedRefs.length },
+        'Restored Teams conversation references from DB',
+      );
+    }
+
     this.connected = true;
     logger.info(
       { tenantMode: isSingleTenant ? 'single' : 'multi' },
@@ -173,10 +192,11 @@ export class TeamsChannel implements Channel {
   private async handleActivity(context: TurnContext): Promise<void> {
     const activity = context.activity;
 
-    // Store conversation reference for proactive messaging
+    // Store conversation reference for proactive messaging (memory + DB)
     const ref = TurnContext.getConversationReference(activity);
     const jid = conversationToJid(activity);
     this.conversationRefs.set(jid, ref);
+    saveConversationReference(jid, 'teams', ref as Record<string, unknown>);
 
     if (activity.type === 'message' && activity.text) {
       const botMentioned = isBotMentioned(activity, this.appId);
