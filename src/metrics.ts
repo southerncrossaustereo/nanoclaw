@@ -1,9 +1,20 @@
-import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
+import {
+  MeterProvider,
+  PeriodicExportingMetricReader,
+} from '@opentelemetry/sdk-metrics';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
-import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
-import type { Counter, Histogram, ObservableGauge, Meter } from '@opentelemetry/api';
+import {
+  ATTR_SERVICE_NAME,
+  ATTR_SERVICE_VERSION,
+} from '@opentelemetry/semantic-conventions';
+import type {
+  Counter,
+  Histogram,
+  ObservableGauge,
+  Meter,
+} from '@opentelemetry/api';
 import { registerRoute } from './http-server.js';
 import { logger } from './logger.js';
 
@@ -38,7 +49,9 @@ export function initMetrics(): void {
 
   const otlpEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
   if (otlpEndpoint) {
-    const otlpExporter = new OTLPMetricExporter({ url: `${otlpEndpoint}/v1/metrics` });
+    const otlpExporter = new OTLPMetricExporter({
+      url: `${otlpEndpoint}/v1/metrics`,
+    });
     readers.push(
       new PeriodicExportingMetricReader({
         exporter: otlpExporter,
@@ -60,15 +73,21 @@ export function initMetrics(): void {
     description: 'Total number of alert investigations completed',
   });
 
-  containerInvocationsTotal = meter.createCounter('container_invocations_total', {
-    description: 'Total number of container agent invocations',
-  });
+  containerInvocationsTotal = meter.createCounter(
+    'container_invocations_total',
+    {
+      description: 'Total number of container agent invocations',
+    },
+  );
 
   // Histograms
-  alertInvestigationDuration = meter.createHistogram('alert_investigation_duration_seconds', {
-    description: 'Time from alert received to investigation complete',
-    unit: 's',
-  });
+  alertInvestigationDuration = meter.createHistogram(
+    'alert_investigation_duration_seconds',
+    {
+      description: 'Time from alert received to investigation complete',
+      unit: 's',
+    },
+  );
 
   containerDuration = meter.createHistogram('container_duration_seconds', {
     description: 'Container agent execution duration',
@@ -76,9 +95,12 @@ export function initMetrics(): void {
   });
 
   // Gauge — observed on scrape
-  const pendingGauge: ObservableGauge = meter.createObservableGauge('pending_investigations', {
-    description: 'Number of alerts awaiting investigation',
-  });
+  const pendingGauge: ObservableGauge = meter.createObservableGauge(
+    'pending_investigations',
+    {
+      description: 'Number of alerts awaiting investigation',
+    },
+  );
   pendingGauge.addCallback((result) => {
     result.observe(pendingInvestigationsValue);
   });
@@ -93,12 +115,19 @@ export function initMetrics(): void {
   logger.info('Metrics initialised (Prometheus: /metrics)');
 }
 
-async function getMetricsText(): Promise<{ text: string; contentType: string }> {
+async function getMetricsText(): Promise<{
+  text: string;
+  contentType: string;
+}> {
   return new Promise((resolve) => {
     const mockReq = {} as any;
     const mockRes = {
       setHeader: () => {},
-      end: (text: string) => resolve({ text, contentType: 'text/plain; version=0.0.4; charset=utf-8' }),
+      end: (text: string) =>
+        resolve({
+          text,
+          contentType: 'text/plain; version=0.0.4; charset=utf-8',
+        }),
     } as any;
     prometheusExporter.getMetricsRequestHandler(mockReq, mockRes);
   });

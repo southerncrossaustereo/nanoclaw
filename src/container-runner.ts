@@ -1191,25 +1191,43 @@ export function writeAlertsSnapshot(groupFolder: string): void {
     lastHour: {
       total: recent.length,
       byInvestigationStatus: byStatus,
-      alerts: recent.map((a: { id: string; type: string; severity: number; status: string; investigationStatus?: string; investigationSummary?: string; firedAt: string; resource: string }) => ({
-        id: a.id,
-        type: a.type,
-        severity: a.severity,
-        status: a.status,
-        investigationStatus: a.investigationStatus,
-        investigationSummary: a.investigationSummary,
-        firedAt: a.firedAt,
-        resource: a.resource,
-      })),
+      alerts: recent.map(
+        (a: {
+          id: string;
+          type: string;
+          severity: number;
+          status: string;
+          investigationStatus?: string;
+          investigationSummary?: string;
+          firedAt: string;
+          resource: string;
+        }) => ({
+          id: a.id,
+          type: a.type,
+          severity: a.severity,
+          status: a.status,
+          investigationStatus: a.investigationStatus,
+          investigationSummary: a.investigationSummary,
+          firedAt: a.firedAt,
+          resource: a.resource,
+        }),
+      ),
     },
     pendingInvestigations: {
       count: pending.length,
-      alerts: pending.map((a: { id: string; type: string; severity: number; firedAt: string }) => ({
-        id: a.id,
-        type: a.type,
-        severity: a.severity,
-        firedAt: a.firedAt,
-      })),
+      alerts: pending.map(
+        (a: {
+          id: string;
+          type: string;
+          severity: number;
+          firedAt: string;
+        }) => ({
+          id: a.id,
+          type: a.type,
+          severity: a.severity,
+          firedAt: a.firedAt,
+        }),
+      ),
     },
   };
 
