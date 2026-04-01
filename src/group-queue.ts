@@ -30,6 +30,7 @@ interface GroupState {
 export class GroupQueue {
   private groups = new Map<string, GroupState>();
   private activeCount = 0;
+  private activeTaskCount = 0;
   private waitingGroups: string[] = [];
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
@@ -70,18 +71,9 @@ export class GroupQueue {
       return;
     }
 
-    if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
-      state.pendingMessages = true;
-      if (!this.waitingGroups.includes(groupJid)) {
-        this.waitingGroups.push(groupJid);
-      }
-      logger.debug(
-        { groupJid, activeCount: this.activeCount },
-        'At concurrency limit, message queued',
-      );
-      return;
-    }
-
+    // Interactive messages are never blocked by the global concurrency limit.
+    // Only background tasks (alert investigations, scheduled tasks) are capped.
+    // This prevents long-running investigations from starving user conversations.
     this.runForGroup(groupJid, 'messages').catch((err) =>
       logger.error({ groupJid, err }, 'Unhandled error in runForGroup'),
     );
@@ -111,14 +103,14 @@ export class GroupQueue {
       return;
     }
 
-    if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
+    if (this.activeTaskCount >= MAX_CONCURRENT_CONTAINERS) {
       state.pendingTasks.push({ id: taskId, groupJid, fn });
       if (!this.waitingGroups.includes(groupJid)) {
         this.waitingGroups.push(groupJid);
       }
       logger.debug(
-        { groupJid, taskId, activeCount: this.activeCount },
-        'At concurrency limit, task queued',
+        { groupJid, taskId, activeTaskCount: this.activeTaskCount },
+        'At task concurrency limit, task queued',
       );
       return;
     }
@@ -238,9 +230,10 @@ export class GroupQueue {
     state.isTaskContainer = true;
     state.runningTaskId = task.id;
     this.activeCount++;
+    this.activeTaskCount++;
 
     logger.debug(
-      { groupJid, taskId: task.id, activeCount: this.activeCount },
+      { groupJid, taskId: task.id, activeCount: this.activeCount, activeTaskCount: this.activeTaskCount },
       'Running queued task',
     );
 
@@ -256,6 +249,7 @@ export class GroupQueue {
       state.containerName = null;
       state.groupFolder = null;
       this.activeCount--;
+      this.activeTaskCount--;
       this.drainGroup(groupJid);
     }
   }
