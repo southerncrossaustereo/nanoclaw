@@ -102,6 +102,10 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
+export const MAX_CONCURRENT_MESSAGES = Math.max(
+  1,
+  parseInt(process.env.MAX_CONCURRENT_MESSAGES || String(MAX_CONCURRENT_CONTAINERS), 10) || MAX_CONCURRENT_CONTAINERS,
+);
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

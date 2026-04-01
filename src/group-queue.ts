@@ -2,7 +2,7 @@ import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { DATA_DIR, MAX_CONCURRENT_CONTAINERS, MAX_CONCURRENT_MESSAGES } from './config.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -31,6 +31,7 @@ export class GroupQueue {
   private groups = new Map<string, GroupState>();
   private activeCount = 0;
   private activeTaskCount = 0;
+  private activeMessageCount = 0;
   private waitingGroups: string[] = [];
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
@@ -71,9 +72,21 @@ export class GroupQueue {
       return;
     }
 
-    // Interactive messages are never blocked by the global concurrency limit.
-    // Only background tasks (alert investigations, scheduled tasks) are capped.
-    // This prevents long-running investigations from starving user conversations.
+    // Interactive messages have their own concurrency limit, separate from tasks.
+    // This prevents long-running investigations from starving user conversations,
+    // while still capping total message containers to prevent abuse.
+    if (this.activeMessageCount >= MAX_CONCURRENT_MESSAGES) {
+      state.pendingMessages = true;
+      if (!this.waitingGroups.includes(groupJid)) {
+        this.waitingGroups.push(groupJid);
+      }
+      logger.warn(
+        { groupJid, activeMessageCount: this.activeMessageCount },
+        'At message concurrency limit, message queued',
+      );
+      return;
+    }
+
     this.runForGroup(groupJid, 'messages').catch((err) =>
       logger.error({ groupJid, err }, 'Unhandled error in runForGroup'),
     );
@@ -195,9 +208,10 @@ export class GroupQueue {
     state.isTaskContainer = false;
     state.pendingMessages = false;
     this.activeCount++;
+    this.activeMessageCount++;
 
     logger.debug(
-      { groupJid, reason, activeCount: this.activeCount },
+      { groupJid, reason, activeCount: this.activeCount, activeMessageCount: this.activeMessageCount },
       'Starting container for group',
     );
 
@@ -219,6 +233,7 @@ export class GroupQueue {
       state.containerName = null;
       state.groupFolder = null;
       this.activeCount--;
+      this.activeMessageCount--;
       this.drainGroup(groupJid);
     }
   }
@@ -233,7 +248,12 @@ export class GroupQueue {
     this.activeTaskCount++;
 
     logger.debug(
-      { groupJid, taskId: task.id, activeCount: this.activeCount, activeTaskCount: this.activeTaskCount },
+      {
+        groupJid,
+        taskId: task.id,
+        activeCount: this.activeCount,
+        activeTaskCount: this.activeTaskCount,
+      },
       'Running queued task',
     );
 
