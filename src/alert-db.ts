@@ -136,7 +136,7 @@ export function getPendingAlerts(): NormalizedAlert[] {
   const db = getDb();
   const rows = db
     .prepare(
-      "SELECT * FROM alerts WHERE investigation_status IN ('pending', 'batching') AND severity <= 4 ORDER BY received_at ASC",
+      "SELECT * FROM alerts WHERE investigation_status IN ('pending', 'batching', 'investigating') AND severity <= 4 ORDER BY received_at ASC",
     )
     .all() as Record<string, unknown>[];
   return rows.map(rowToAlert);
