@@ -343,10 +343,16 @@ ${k.knowledge.slice(-2000)}`,
 
 2. **Investigate root cause**: Use available tools:
    - \`az\` CLI for Azure resource status, metrics, logs, activity log
-   - \`az devops\` / \`az pipelines\` / \`az repos\` for Azure DevOps — use when the alert points to application code, a failed deployment, or a regression. Always pass \`--org https://dev.azure.com/southerncrossaustereo\`. Examples:
-     - \`az pipelines runs list --org ... --project "MyProject" --pipeline-id 123 -o table\` — recent pipeline runs
-     - \`az repos list --org ... --project "MyProject" -o table\` — list repositories
-     - \`az devops invoke --area git --resource items --route-parameters project=MyProject repositoryId=MyRepo --query-parameters "path=/src/MyFile.cs&versionDescriptor.version=main"\` — fetch a source file
+   - **Source control** — use when the alert points to application code, a failed deployment, or a regression. Check all platforms as relevant code may live in any of them:
+     - **Azure DevOps** (\`az devops\` / \`az pipelines\` / \`az repos\`): always pass \`--org https://dev.azure.com/southerncrossaustereo\`
+       - \`az pipelines runs list --org ... --project "MyProject" --pipeline-id 123 -o table\` — recent pipeline runs
+       - \`az repos list --org ... --project "MyProject" -o table\` — list repositories
+       - \`az devops invoke --area git --resource items --route-parameters project=MyProject repositoryId=MyRepo --query-parameters "path=/src/MyFile.cs&versionDescriptor.version=main"\` — fetch a source file
+     - **GitHub** (\`gh\`): org is \`southerncrossaustereo\`
+       - \`gh repo list southerncrossaustereo --limit 50\` — list repos
+       - \`gh api repos/southerncrossaustereo/REPO/contents/path/to/file\` — fetch a file
+       - \`gh search repos --owner southerncrossaustereo TERM\` — find relevant repos
+     - **GitLab** (\`https://g.scadigital.io/\`): not yet accessible from this environment — skip for now
    - \`atlassian-api\` for Jira/Confluence — search for known issues, runbooks, past incidents
      - \`atlassian-api jira-search "project = OPS AND status = Open"\`
      - \`atlassian-api confluence-search "runbook error message"\`
