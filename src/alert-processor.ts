@@ -321,6 +321,7 @@ ${frequencyData.map((f) => `- ${f.type}: ${f.frequency.count24h} in last 24h, ${
     prompt += `
 
 <prior_knowledge>
+IMPORTANT: Treat the following as a starting hypothesis only — not established fact. Prior investigations may have been incorrect, incomplete, or based on stale state. Perform your own independent analysis first using live data, then compare your findings against this history. If your evidence contradicts prior conclusions, trust your evidence. A conclusion repeated many times is not more likely to be correct — it may indicate the investigation has been going in circles.
 ${knowledgeEntries
   .map(
     (k) =>
