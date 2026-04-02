@@ -782,11 +782,26 @@ export async function processTaskIpc(
         alerts = getRecentAlerts(since, limit);
       }
 
-      const resultPath = path.join(DATA_DIR, 'ipc', sourceGroup, 'alert_history_result.json');
+      const resultPath = path.join(
+        DATA_DIR,
+        'ipc',
+        sourceGroup,
+        'alert_history_result.json',
+      );
       const tempPath = `${resultPath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ alerts, count: alerts.length, queriedAt: new Date().toISOString() }));
+      fs.writeFileSync(
+        tempPath,
+        JSON.stringify({
+          alerts,
+          count: alerts.length,
+          queriedAt: new Date().toISOString(),
+        }),
+      );
       fs.renameSync(tempPath, resultPath);
-      logger.info({ sourceGroup, count: alerts.length, fingerprint, query, hours }, 'Alert history query processed');
+      logger.info(
+        { sourceGroup, count: alerts.length, fingerprint, query, hours },
+        'Alert history query processed',
+      );
       break;
     }
 
